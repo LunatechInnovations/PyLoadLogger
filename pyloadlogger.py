@@ -32,6 +32,7 @@ def main():
 	curses.cbreak()
 	stdscr.nodelay(True)
 
+	#TODO handle command line arguments
 	#Setup port
 	baudrate = 9600
 	device = "/dev/ttyUSB0"
@@ -54,24 +55,24 @@ def main():
 
 	#Main loop
 	while stdscr.getch() != 27:
+		#Synchronize messages
 		errcounter = 0
-		try:
-			#Synchronize messages
-			while port.read(1) != chr(2):
-				errcounter += 1
-				if errcounter >= 100:
-					print "Error reading from serial port. STX flag not found"
-					return 0
+		while port.read(1) != chr(2):
+			errcounter += 1
+			#Received 100 characters none of them STX
+			if errcounter >= 99:
+				stdscr.addstr(0, 0, "Error reading from serial port. STX flag not found")
+				stdscr.refresh()
+				return 0
 
-			rcv = port.read(10)
+		rcv = port.read(10)
 
-		except serial.SerialException as e:
-			print "Reading aborted"
-			break
 
 		#Fetch values
 		if rcv[9] != chr(3):
-			print "Error reading from serial port. ETX flag not found"
+			stdscr.addstr(0, 0, "Error reading from serial port. ETX flag not found")
+			stdscr.refresh()
+			break;
 
 		weight = int(rcv[0:8].replace(" ", ""))
 		status = status_name(rcv[8])
@@ -85,11 +86,18 @@ def main():
 		stdscr.addstr(7, 0, "")
 		stdscr.refresh()
 
-		#Add value to file
+		#Append value to file
 		output_file.write("%d\n" % weight)
 
+	#Clean up
 	port.close()
 	output_file.close()
+
+	curses.nocbreak()
+	curses.echo()
+	curses.nocbreak()
+	curses.endwin()
+
 
 if __name__ == '__main__':
 	main()
