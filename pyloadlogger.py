@@ -1,19 +1,11 @@
 #!/bin/python
 
 import serial
-import signal, os
 import datetime, time
+import curses
 
 #Global variables
 g_run = True
-
-#Setup signal for clean exit on Ctrl+c
-def signal_handler(signum, frame):
-	g_run = False
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGABRT, signal_handler)
 
 #status_name
 #Return a human readable status value based on the character sent on serial port
@@ -34,16 +26,26 @@ def status_name(s):
 	return "Invalid status"
 
 def main():
+	#Setup curses
+	stdscr = curses.initscr()
+	curses.noecho()
+	curses.cbreak()
+	stdscr.nodelay(True)
+
 	#Setup port
 	baudrate = 9600
 	device = "/dev/ttyUSB0"
-	timeout = 3.0
+	read_timeout = 3.0
 	xonxoff = False
 	parity = serial.PARITY_NONE
 	stopbits = serial.STOPBITS_ONE
 	bytesize = serial.EIGHTBITS
+	rtscts = False
+	write_timeout = 10.0
+	dsrdtr = True
+	
 
-	port = serial.Serial(device, baudrate, bytesize, parity, stopbits, timeout, xonxoff)
+	port = serial.Serial(device, baudrate, bytesize, parity, stopbits, read_timeout, xonxoff, rtscts, write_timeout, dsrdtr)
 
 	#Setup output file
 	ts = time.time()
@@ -51,16 +53,39 @@ def main():
 	output_file = open(filename, "w")
 
 	#Main loop
-	while g_run:
+	while stdscr.getch() != 27:
+		errcounter = 0
 		try:
-			rcv = port.read(11)
+			#Synchronize messages
+			while port.read(1) != chr(2):
+				errcounter += 1
+				if errcounter >= 100:
+					print "Error reading from serial port. STX flag not found"
+					return 0
+
+			rcv = port.read(10)
+
 		except serial.SerialException as e:
 			print "Reading aborted"
 			break
 
-		weight = int(rcv[1:9])
-		status = status_name(rcv[9])
-		print "Weight: %d Status: %s" % (weight, status)
+		#Fetch values
+		if rcv[9] != chr(3):
+			print "Error reading from serial port. ETX flag not found"
+
+		weight = int(rcv[0:8].replace(" ", ""))
+		status = status_name(rcv[8])
+
+		#Update screen
+		stdscr.addstr(0, 0, "Press escape to quit")
+		stdscr.addstr(2, 0, "Reading from: %s" % port.port)
+		stdscr.addstr(3, 0, "Logging to file: %s" % filename)
+		stdscr.addstr(5, 0, "Weight: %13dkg" % weight)
+		stdscr.addstr(6, 0, "Status: %15s" % status)
+		stdscr.addstr(7, 0, "")
+		stdscr.refresh()
+
+		#Add value to file
 		output_file.write("%d\n" % weight)
 
 	port.close()
