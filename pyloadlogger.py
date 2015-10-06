@@ -3,6 +3,7 @@
 import serial
 import datetime, time
 import curses
+import os.path
 
 #Global variables
 g_run = True
@@ -25,55 +26,72 @@ def status_name(s):
 
 	return "Invalid status"
 
-def main():
-	#Setup curses
-	stdscr = curses.initscr()
-	curses.noecho()
-	curses.cbreak()
-	stdscr.nodelay(True)
+def setup_port(port):
+	port.baudrate = 9600
+	port.port = "/dev/ttyUSB0"
+	port.timeout = 3.0
+	port.xonxoff = False
+	port.parity = serial.PARITY_NONE
+	port.stopbits = serial.STOPBITS_ONE
+	port.bytesize = serial.EIGHTBITS
+	port.rtscts = False
+	port.write_timeout = 10.0
+	port.dsrdtr = False
 
+def main():
 	#TODO handle command line arguments
 	#Setup port
-	baudrate = 9600
-	device = "/dev/ttyUSB0"
-	read_timeout = 3.0
-	xonxoff = False
-	parity = serial.PARITY_NONE
-	stopbits = serial.STOPBITS_ONE
-	bytesize = serial.EIGHTBITS
-	rtscts = False
-	write_timeout = 10.0
-	dsrdtr = True
-	
+	port = serial.Serial()
+	setup_port(port)
+	if not os.path.exists(port.port):
+		print "Port not found: %s" % port.port
+		return 1
 
-	port = serial.Serial(device, baudrate, bytesize, parity, stopbits, read_timeout, xonxoff, rtscts, write_timeout, dsrdtr)
+	print "Opening port: %s" % port.port
+	port.open()
 
 	#Setup output file
 	ts = time.time()
 	filename = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d_%H:%M:%S') + ".csv"
 	output_file = open(filename, "w")
 
+	#Setup curses
+	stdscr = curses.initscr()
+	curses.noecho()
+	curses.cbreak()
+	stdscr.nodelay(True)
+
 	#Main loop
 	while stdscr.getch() != 27:
 		#Synchronize messages
 		errcounter = 0
-		while port.read(1) != chr(2):
-			errcounter += 1
-			#Received 100 characters none of them STX
-			if errcounter >= 99:
-				stdscr.addstr(0, 0, "Error reading from serial port. STX flag not found")
-				stdscr.refresh()
-				return 0
+		try:
+			while port.read(1) != chr(2):
+				errcounter += 1
+				#Received 100 characters none of them equal to STX
+				if errcounter >= 99:
+					break
 
-		rcv = port.read(10)
 
+			rcv = port.read(10)
+		except serial.SerialException as e:
+			stdscr.addstr(0, 0, "Error reading from serial port.")
+			stdscr.refresh()
+			time.sleep(1)
+			break
+
+		if errcounter >= 99:
+			stdscr.addstr(0, 0, "Error reading from serial port. STX flag not found")
+			stdscr.refresh()
+			time.sleep(1)
+			break
 
 		#Fetch values
 		if rcv[9] != chr(3):
 			stdscr.addstr(0, 0, "Error reading from serial port. ETX flag not found")
 			stdscr.refresh()
-			break;
-
+			time.sleep(1)
+			break
 		weight = int(rcv[0:8].replace(" ", ""))
 		status = status_name(rcv[8])
 
@@ -89,15 +107,17 @@ def main():
 		#Append value to file
 		output_file.write("%d\n" % weight)
 
-	#Clean up
+	#Clean up serial port
 	port.close()
+
+	#Clean up output file
 	output_file.close()
 
+	#Clean up curses
 	curses.nocbreak()
 	curses.echo()
 	curses.nocbreak()
 	curses.endwin()
-
 
 if __name__ == '__main__':
 	main()
