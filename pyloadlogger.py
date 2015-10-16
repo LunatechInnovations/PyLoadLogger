@@ -4,6 +4,8 @@ import serial
 import datetime, time
 import curses
 import os.path
+import sys
+import matplotlib.pyplot as plt
 
 #Global variables
 g_run = True
@@ -38,14 +40,24 @@ def setup_port(port):
 	port.write_timeout = 10.0
 	port.dsrdtr = False
 
+def close_curses():
+	curses.nocbreak()
+	curses.echo()
+	curses.nocbreak()
+	curses.endwin()
+
+def error_exit(msg):
+	close_curses()
+	print >> sys.stderr, msg
+	sys.exit(1)
+
 def main():
 	#TODO handle command line arguments
 	#Setup port
 	port = serial.Serial()
 	setup_port(port)
 	if not os.path.exists(port.port):
-		print "Port not found: %s" % port.port
-		return 1
+		error_exit("File not found: %s" % port.port)
 
 	print "Opening port: %s" % port.port
 	port.open()
@@ -61,6 +73,11 @@ def main():
 	curses.cbreak()
 	stdscr.nodelay(True)
 
+	#Setup plot data
+	data = []
+	time = []
+	current_time = 0
+
 	#Main loop
 	while stdscr.getch() != 27:
 		#Synchronize messages
@@ -75,25 +92,25 @@ def main():
 
 			rcv = port.read(10)
 		except serial.SerialException as e:
-			stdscr.addstr(0, 0, "Error reading from serial port.")
-			stdscr.refresh()
-			time.sleep(1)
+			error_exit("Error reading from serial port.")
 			break
 
 		if errcounter >= 99:
-			stdscr.addstr(0, 0, "Error reading from serial port. STX flag not found")
-			stdscr.refresh()
-			time.sleep(1)
+			error_exit("Error reading from serial port. STX flag not found")
 			break
 
 		#Fetch values
 		if rcv[9] != chr(3):
-			stdscr.addstr(0, 0, "Error reading from serial port. ETX flag not found")
-			stdscr.refresh()
-			time.sleep(1)
+			error_exit("Error reading from serial port. ETX flag not found")
 			break
+
 		weight = int(rcv[0:8].replace(" ", ""))
 		status = status_name(rcv[8])
+
+		#Add plot data
+		data.append(weight)
+		time.append(current_time)
+		current_time += 0.1
 
 		#Update screen
 		stdscr.addstr(0, 0, "Press escape to quit")
@@ -114,10 +131,15 @@ def main():
 	output_file.close()
 
 	#Clean up curses
-	curses.nocbreak()
-	curses.echo()
-	curses.nocbreak()
-	curses.endwin()
+	close_curses()
+
+	#Show plot
+	plt.title('Dragprov')
+	plt.ylabel('Kraft Kg')
+	plt.xlabel('Tid min')
+	plt.grid(True)
+	plt.plot(time, data)
+	plt.show()
 
 if __name__ == '__main__':
 	main()
